@@ -1,7 +1,8 @@
 // src/pages/requester/Dashboard.jsx
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom"; // ← add useNavigate
 import { getRequesterDashboard } from "../../api/requester";
+import { getMyProfile } from "../../api/profile"; // ← add
 import { showToast } from "../../utils/toast";
 
 function Badge({ color = "blue", children }) {
@@ -47,8 +48,33 @@ function EmptyState({ title, hint, action }) {
 }
 
 export default function RequesterDashboard() {
+  const navigate = useNavigate(); // ← add
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
+
+  // Guard: ensure requester profile exists, else redirect to creation
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const me = await getMyProfile();
+        // Require correct role and presence of requesterProfile
+        if (me?.role !== "REQUESTER" || !me?.requesterProfile) {
+          // Optional: toast to inform the user
+          showToast({ variant: "info", message: "Please create your requester profile to continue." });
+          navigate("/requester/profile", { replace: true }); // adjust path if needed
+          return;
+        }
+        if (alive) await load();
+      } catch (e) {
+        console.error(e);
+        // If fetching profile fails (e.g., unauthorized), send to landing/login
+        navigate("/", { replace: true });
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount
 
   async function load() {
     setLoading(true);
@@ -62,8 +88,6 @@ export default function RequesterDashboard() {
       setLoading(false);
     }
   }
-
-  useEffect(() => { load(); }, []);
 
   const stats = data?.stats || {
     openRequests: 0,

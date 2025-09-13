@@ -1,8 +1,9 @@
 // src/pages/donor/Dashboard.jsx
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate, Link } from "react-router-dom"; // ← added useNavigate here
 import { getDonorDashboard, setDonorLastDonation } from "../../api/donor";
+import { getMyProfile } from "../../api/profile"; // ← added
 import { showToast } from "../../utils/toast";
-import { Link } from "react-router-dom";
 
 function daysBetween(a, b) {
   const ms = Math.abs(a.getTime() - b.getTime());
@@ -18,10 +19,33 @@ function formatDateISO(d) {
 }
 
 export default function DonorDashboard() {
+  const navigate = useNavigate(); // ← added
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [data, setData] = useState(null);
   const [dateInput, setDateInput] = useState("");
+
+  // Guard: ensure donor profile exists, else redirect to creation
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const me = await getMyProfile();
+        if (me?.role !== "DONOR" || !me?.donorProfile) {
+          navigate("/donor/profile", { replace: true });
+          return;
+        }
+        // If ok, load dashboard data
+        if (alive) await load();
+      } catch (e) {
+        console.error(e);
+        // If fetching profile fails (e.g., unauthorized), take user to landing/login
+        navigate("/", { replace: true });
+      }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount
 
   async function load() {
     setLoading(true);
@@ -41,10 +65,6 @@ export default function DonorDashboard() {
       setLoading(false);
     }
   }
-
-  useEffect(() => {
-    load();
-  }, []);
 
   const { eligibilityText, isEligible, daysRemaining, nextEligibleDate } = useMemo(() => {
     const cooldownDays = 54;
