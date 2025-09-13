@@ -1,0 +1,48 @@
+@import "./variables.css";
+@import "./typography.css";
+@import "./layout.css";
+@import "./controls.css";
+
+/* Reset-ish */
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  background: linear-gradient(135deg, var(--color-bg), var(--color-bg-soft));
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  line-height: var(--line-height);
+}
+
+/* Utility helpers */
+.hidden { display: none; }
+.muted { color: var(--color-text-muted); }
+
+
+/* Example styles (adjust to your design system) */
+.nav-link {
+  color: #e5e7eb; /* gray-200 */
+  text-decoration: none;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-weight: 500;
+}
+.nav-link:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.nav-link-active {
+  color: white;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* chips - lightweight semantic pills for status */
+.chip { font-size: 12px; padding: 4px 8px; border-radius: 999px; background: rgba(255,255,255,.08); }
+.chip-open { background: rgba(59,130,246,.16); color: #cfe3ff; }
+.chip-default { background: rgba(148,163,184,.16); color: #e2e8f0; }
+.chip-closed, .chip-fulfilled { background: rgba(148,163,184,.16); color: #e2e8f0; }
+
+/* truncate utilities if not present */
+.clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* dot separator spacing */
+.dot-sep { margin: 0 .25rem; }

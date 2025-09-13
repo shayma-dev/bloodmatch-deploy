@@ -1,0 +1,76 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  email         String   @unique
+  passwordHash  String
+  role          String
+  createdAt     DateTime @default(now())
+  donorProfile      DonorProfile?
+  requesterProfile  RequesterProfile?
+}
+
+model DonorProfile {
+  userId            String   @id @db.Uuid
+  user              User     @relation(fields: [userId], references: [id])
+  name              String
+  phone             String
+  bloodType         String
+  lastDonationDate  DateTime @db.Date
+  city              String
+  country           String
+  addressLine       String?
+  photoURL          String?
+  applications      Application[]
+}
+
+model RequesterProfile {
+  userId      String   @id @db.Uuid
+  user        User     @relation(fields: [userId], references: [id])
+  name        String
+  category    String
+  phone       String
+  city        String
+  country     String
+  addressLine String?
+  requests    Request[]
+}
+
+model Request {
+  id               String   @id @default(uuid()) @db.Uuid
+  requesterId      String   @db.Uuid
+  requester        RequesterProfile @relation(fields: [requesterId], references: [userId])
+  bloodType        String
+  unitsNeeded      Int
+  urgency          String
+  caseDescription  String
+  status           String
+  city             String
+  country          String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  applications     Application[]
+}
+
+model Application {
+  id          String   @id @default(uuid()) @db.Uuid
+  requestId   String   @db.Uuid
+  donorId     String   @db.Uuid
+  request     Request  @relation(fields: [requestId], references: [id])
+  donor       DonorProfile @relation(fields: [donorId], references: [userId])
+  status      String
+  createdAt   DateTime @default(now())
+}

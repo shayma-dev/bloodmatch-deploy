@@ -1,0 +1,6 @@
+h1, h2, h3 { margin: 0 0 var(--space-4); }
+h1 { font-size: 1.75rem; }
+h2 { font-size: 1.5rem; }
+h3 { font-size: 1.25rem; }
+p { margin: 0 0 var(--space-3); }
+small { font-size: var(--font-size-sm); color: var(--color-text-muted); }
