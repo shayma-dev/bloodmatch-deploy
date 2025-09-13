@@ -3,10 +3,14 @@
   "version": "1.0.0",
   "description": "Node/Express API for BloodMatch, a platform that matches eligible blood donors with local requests. Implements secure auth, role-based access, request management, and donor applications. Uses PostgreSQL (Prisma) and JWT with refresh tokens.",
   "main": "index.js",
+  "engines": { "node": ">=18" },
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "echo \"Error: no test specified\" && exit 1",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy",
+    "postinstall": "prisma generate",
     "prisma:seed": "node prisma/seed.js"
   },
   "keywords": [],
