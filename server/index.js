@@ -5,6 +5,31 @@ const cors = require("cors");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// --- Step 2: Verify DATABASE_URL actually loaded in production ---
+// Mask password in logs while keeping the rest visible for comparison.
+function maskDbUrl(url) {
+  if (!url) return "(undefined)";
+  try {
+    // Replace password part in: protocol://user:password@host/...
+    return url.replace(/(:\/\/[^:]+:)[^@]+(@)/, "$1****$2");
+  } catch {
+    return "(unparseable)";
+  }
+}
+
+const effectiveDbUrl = process.env.DATABASE_URL;
+console.log("[BOOT] DATABASE_URL (masked):", maskDbUrl(effectiveDbUrl));
+
+// Optional: warn if empty or suspicious
+if (!effectiveDbUrl) {
+  console.warn("[BOOT][WARN] DATABASE_URL is not defined. Prisma/DB will fail.");
+}
+if (/\s/.test(effectiveDbUrl || "")) {
+  console.warn("[BOOT][WARN] DATABASE_URL contains whitespace; double-check your env var.");
+}
+
+// ---------------------------------------------------------------
+
 app.use(cors({ origin: process.env.CORS_ORIGIN, credentials: true }));
 app.use(express.json());
 
