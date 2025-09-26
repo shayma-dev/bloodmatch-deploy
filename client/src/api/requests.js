@@ -71,19 +71,17 @@ export async function getApplicants(id) {
 /**
  * Get a request by ID (Authorized: Donor or Requester)
  * @param {string} id - Request ID
- * Returns: Request object
+ * @param {{ noCache?: boolean }} [opts]
+ * @returns {Promise<any>} Request object
  */
-export async function getRequestById(id) {
-  const { data } = await http.get(`/requests/${id}`);
+export async function getRequestById(id, opts = {}) {
+  const noCache = opts.noCache ? `?ts=${Date.now()}` : "";
+  const { data } = await http.get(`/requests/${id}${noCache}`);
   return data;
 }
 
-/**
- * Get matching requests for the authenticated donor (Donor-only)
- * Server auto-filters based on donorProfile (bloodType, city, country)
- * Returns: Array<Request>
- */
-export async function getMatchingRequests() {
-  const { data } = await http.get("/requests");
+export async function getMatchingRequests(opts = {}) {
+  const noCache = opts.noCache ? `?ts=${Date.now()}` : "";
+  const { data } = await http.get(`/requests${noCache}`);
   return data;
 }

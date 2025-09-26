@@ -17,11 +17,10 @@ const {
 router.get("/:id", auth, async (req, res, next) => {
   try {
     const { id } = req.params;
-    const authUserId = req.user?.id;
+    const authUserId = req.user?.userId; // IMPORTANT: userId, not id
 
     if (!id) return next(new ValidationError("Request ID is required"));
 
-    // Pull request + requester + counts + my application for current user
     const request = await prisma.request.findUnique({
       where: { id },
       include: {
@@ -38,12 +37,14 @@ router.get("/:id", auth, async (req, res, next) => {
           },
         },
         // Only fetch THIS user's latest application for this request
-        applications: {
-          where: { donorId: authUserId },
-          select: { id: true, status: true, createdAt: true },
-          orderBy: { createdAt: "desc" },
-          take: 1,
-        },
+        applications: authUserId
+          ? {
+              where: { donorId: authUserId },
+              select: { id: true, status: true, createdAt: true },
+              orderBy: { createdAt: "desc" },
+              take: 1,
+            }
+          : false,
         _count: { select: { applications: true } },
       },
     });
@@ -51,10 +52,13 @@ router.get("/:id", auth, async (req, res, next) => {
     if (!request) return next(new NotFoundError("Request not found"));
 
     const isOwner = request.requester?.userId === authUserId;
-    const myApplication = request.applications?.[0] || null;
+
+    const myApplication = Array.isArray(request.applications)
+      ? request.applications[0] || null
+      : null;
+
     const hasActiveApplication = myApplication?.status === "Applied";
 
-    // Build a response object we can safely mutate
     const result = {
       ...request,
       myApplication,
@@ -62,30 +66,36 @@ router.get("/:id", auth, async (req, res, next) => {
       ownerView: isOwner,
     };
 
-    // Privacy gating: strip contact from requester for non-owners without an active application
+    // Privacy gating for non-owners with no active app
     if (!isOwner && !hasActiveApplication && result.requester) {
       result.requester = {
         ...result.requester,
-        // Keep identity/location
         name: result.requester.name,
         city: result.requester.city,
         country: result.requester.country,
         category: result.requester.category,
         addressLine: result.requester.addressLine,
         user: result.requester.user ? { id: result.requester.user.id } : null,
-        // Strip phone and email
-        phone: undefined,
+        phone: undefined, // strip phone
       };
-      // If you also want to hide email, already handled by setting user to { id } only
     }
 
-    // Clean up: remove the applications array we used for "myApplication"
     delete result.applications;
+
+    // Prevent caching and ensure per-user caches
+    res.set("Cache-Control", "no-store");
+    res.set("Vary", "Authorization");
 
     res.json(result);
   } catch (e) {
-    next(new AppError("Failed to fetch request", 500, undefined, { details: e.message }));
+    next(
+      new AppError("Failed to fetch request", 500, undefined, {
+        details: e.message,
+      })
+    );
   }
 });
+
+module.exports = router;
 
 module.exports = router;

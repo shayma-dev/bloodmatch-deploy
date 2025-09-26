@@ -1,6 +1,6 @@
 /* eslint-disable no-unused-vars */
 // src/pages/donor/RequestDetails.jsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import Button from "../../ui/controls/Button";
 import { getRequestById } from "../../api/requests";
@@ -35,94 +35,161 @@ export default function RequestDetails() {
   const [myApp, setMyApp] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Prefer the backend-provided boolean; fallback to local check for safety
+  // Authoritative per-user state: prefer myApp.status
   const hasActive = useMemo(() => {
-    if (req?.hasActiveApplication !== undefined)
-      return !!req.hasActiveApplication;
-    return myApp?.status === "Applied";
-  }, [req, myApp]);
+    if (myApp?.status) return myApp.status === "Applied";
+    if (typeof req?.hasActiveApplication === "boolean")
+      return req.hasActiveApplication;
+    return false;
+  }, [myApp?.status, req?.hasActiveApplication]);
+
+  const fetchRequest = useCallback(async () => {
+    const data = await getRequestById(id, { noCache: true });
+    setReq(data);
+    setMyApp(data?.myApplication ?? null);
+  }, [id]);
 
   useEffect(() => {
-    let active = true;
+    let alive = true;
     (async () => {
       try {
-        const data = await getRequestById(id);
-        if (!active) return;
-        setReq(data);
-        // Seed myApp from the server if present
-        if (data?.myApplication) setMyApp(data.myApplication);
+        setLoading(true);
+        await fetchRequest();
       } catch (e) {
-        showToast({
-          variant: "error",
-          message: e.message || "Failed to load request",
-        });
+        if (alive) {
+          showToast({
+            variant: "error",
+            message: e?.message || "Failed to load request",
+          });
+        }
       } finally {
-        if (active) setLoading(false);
+        if (alive) setLoading(false);
       }
     })();
     return () => {
-      active = false;
+      alive = false;
     };
-  }, [id]);
+  }, [fetchRequest]);
 
-  async function refreshRequest() {
-    try {
-      const data = await getRequestById(id);
-      setReq(data);
-      setMyApp(data?.myApplication ?? null);
-    } catch (e) {
-      // Keep page usable even if refresh fails; surface a toast
-      showToast({
-        variant: "error",
-        message: e.message || "Failed to refresh request",
-      });
-    }
+  // Optimistic state setters
+  function setOptimisticApplied() {
+    setMyApp((prev) => {
+      if (prev?.id) return { ...prev, status: "Applied" };
+      return {
+        id: prev?.id || "__local__",
+        status: "Applied",
+        createdAt: new Date().toISOString(),
+      };
+    });
+    setReq((prev) =>
+      prev
+        ? {
+            ...prev,
+            hasActiveApplication: true,
+            _count:
+              prev._count?.applications !== undefined
+                ? {
+                    ...prev._count,
+                    // If your count is "active applicants", increment; if "total ever", remove this change.
+                    applications: prev._count.applications + 1,
+                  }
+                : prev._count,
+          }
+        : prev
+    );
+  }
+
+  function setOptimisticWithdrawn() {
+    setMyApp((prev) => (prev ? { ...prev, status: "Withdrawn" } : prev));
+    setReq((prev) =>
+      prev
+        ? {
+            ...prev,
+            hasActiveApplication: false,
+            _count:
+              prev._count?.applications !== undefined
+                ? {
+                    ...prev._count,
+                    applications:
+                      typeof prev._count.applications === "number" &&
+                      prev._count.applications > 0
+                        ? prev._count.applications - 1
+                        : 0,
+                  }
+                : prev._count,
+          }
+        : prev
+    );
   }
 
   async function onApply() {
     if (!req) return;
+    if (hasActive) {
+      return showToast({
+        variant: "info",
+        message: "You have already applied to this request",
+      });
+    }
     if (
       !confirm(
         "Apply to this request? Your contact details will be shared with the requester."
       )
     )
       return;
+
     try {
       setSubmitting(true);
+      // Optimistic flip
+      setOptimisticApplied();
+
+      // Server call
       const created = await applyToRequest(req.id);
-      // Update local state from server to ensure consistency (gating, counts, etc.)
-      await refreshRequest();
+
+      // Seed real ID immediately so Withdraw is enabled even before refetch
+      if (created?.id) {
+        setMyApp((prev) => ({
+          id: created.id,
+          status: created.status || "Applied",
+          createdAt: created.createdAt || new Date().toISOString(),
+        }));
+      }
+
+      // Re-sync authoritative state
+      await fetchRequest();
+
       showToast({ variant: "success", message: "Applied successfully" });
     } catch (e) {
-      showToast({ variant: "error", message: e.message || "Failed to apply" });
+      // Rollback by refetching current server state
+      await fetchRequest();
+      showToast({ variant: "error", message: e?.message || "Failed to apply" });
     } finally {
       setSubmitting(false);
     }
   }
 
   async function onWithdraw() {
-    // Strong guards: require an active application
-    if (
-      !req?.hasActiveApplication ||
-      myApp?.status !== "Applied" ||
-      !myApp?.id
-    ) {
+    if (!hasActive || !myApp?.id) {
       return showToast({
         variant: "error",
         message: "No active application to withdraw",
       });
     }
     if (!confirm("Withdraw your application?")) return;
+
     try {
       setSubmitting(true);
+      setOptimisticWithdrawn();
+
       await withdrawApplication(myApp.id);
-      // Ensure UI reflects inactive state using authoritative server data
-      await refreshRequest();
+
+      await fetchRequest();
+
       showToast({ variant: "success", message: "Application withdrawn" });
     } catch (e) {
+      await fetchRequest();
       showToast({
         variant: "error",
-        message: e.message || "Failed to withdraw",
+        message: e?.message || "Failed to withdraw",
       });
     } finally {
       setSubmitting(false);
@@ -132,7 +199,6 @@ export default function RequestDetails() {
   const urgencyClass = (u) => `badge badge-${toLowerSafe(u)}`;
   const statusClass = (s) => `chip chip-${toLowerSafe(s) || "default"}`;
 
-  // Derived requester fields (post-gating)
   const requester = req?.requester;
   const requesterName = requester?.name;
   const requesterEmail = requester?.user?.email; // may be gated
@@ -150,18 +216,13 @@ export default function RequestDetails() {
       ) : (
         <div className="card">
           {/* Header */}
-          <div
-            className="flex-between"
-            style={{ alignItems: "center", gap: 12 }}
-          >
+          <div className="flex-between" style={{ alignItems: "center", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
               <h2 style={{ margin: 0 }}>Request Details</h2>
               <span className={statusClass(req.status)}>{req.status}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span className="muted" style={{ fontSize: 12 }}>
-                Urgency:
-              </span>
+              <span className="muted" style={{ fontSize: 12 }}>Urgency:</span>
               <span className={urgencyClass(req.urgency)}>{req.urgency}</span>
             </div>
           </div>
@@ -177,36 +238,24 @@ export default function RequestDetails() {
             }}
           >
             <div>
-              <div className="muted" style={{ fontSize: 12 }}>
-                Blood Type
-              </div>
+              <div className="muted" style={{ fontSize: 12 }}>Blood Type</div>
               <div style={{ fontWeight: 700 }}>{req.bloodType}</div>
             </div>
             <div>
-              <div className="muted" style={{ fontSize: 12 }}>
-                Units Needed
-              </div>
+              <div className="muted" style={{ fontSize: 12 }}>Units Needed</div>
               <div style={{ fontWeight: 700 }}>{req.unitsNeeded}</div>
             </div>
             <div>
-              <div className="muted" style={{ fontSize: 12 }}>
-                Location
-              </div>
-              <div>
-                {req.city}, {req.country}
-              </div>
+              <div className="muted" style={{ fontSize: 12 }}>Location</div>
+              <div>{req.city}, {req.country}</div>
             </div>
             <div>
-              <div className="muted" style={{ fontSize: 12 }}>
-                Posted
-              </div>
+              <div className="muted" style={{ fontSize: 12 }}>Posted</div>
               <div>{timeAgo(req.createdAt)}</div>
             </div>
             {req?._count?.applications !== undefined && (
               <div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  Applicants
-                </div>
+                <div className="muted" style={{ fontSize: 12 }}>Applicants</div>
                 <div style={{ fontWeight: 700 }}>{req._count.applications}</div>
               </div>
             )}
@@ -228,7 +277,7 @@ export default function RequestDetails() {
               <h4 style={{ marginBottom: 10 }}>Requester</h4>
 
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                {/* Avatar Initials (no photoURL in schema for requester) */}
+                {/* Avatar Initials */}
                 <div
                   aria-label="Requester initials"
                   style={{
@@ -255,14 +304,9 @@ export default function RequestDetails() {
                     requester?.country) && (
                     <div className="muted" style={{ fontSize: 12 }}>
                       {requester?.category ? `${requester.category}` : ""}
-                      {requester?.category &&
-                      (requester?.city || requester?.country)
-                        ? " • "
-                        : ""}
+                      {requester?.category && (requester?.city || requester?.country) ? " • " : ""}
                       {requester?.city || requester?.country
-                        ? `${requester?.city || ""}${
-                            requester?.city && requester?.country ? ", " : ""
-                          }${requester?.country || ""}`
+                        ? `${requester?.city || ""}${requester?.city && requester?.country ? ", " : ""}${requester?.country || ""}`
                         : ""}
                     </div>
                   )}
@@ -273,19 +317,13 @@ export default function RequestDetails() {
               {requesterPhone || requesterEmail ? (
                 <div style={{ marginTop: 10, display: "grid", gap: 6 }}>
                   {requesterPhone && (
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 8 }}
-                    >
-                      <span className="muted" style={{ width: 80 }}>
-                        Phone
-                      </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className="muted" style={{ width: 80 }}>Phone</span>
                       <span>{requesterPhone}</span>
                       <button
                         type="button"
                         className="btn tiny"
-                        onClick={() =>
-                          navigator.clipboard.writeText(requesterPhone)
-                        }
+                        onClick={() => navigator.clipboard.writeText(requesterPhone)}
                         title="Copy phone"
                       >
                         Copy
@@ -293,28 +331,18 @@ export default function RequestDetails() {
                     </div>
                   )}
                   {requesterEmail && (
-                    <div
-                      style={{ display: "flex", alignItems: "center", gap: 8 }}
-                    >
-                      <span className="muted" style={{ width: 80 }}>
-                        Email
-                      </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span className="muted" style={{ width: 80 }}>Email</span>
                       <a
                         href={`mailto:${requesterEmail}`}
-                        style={{
-                          color: "#93C5FD", // light, friendly accent
-                          textDecoration: "none",
-                          fontWeight: 500,
-                        }}
+                        style={{ color: "#93C5FD", textDecoration: "none", fontWeight: 500 }}
                       >
                         {requesterEmail}
                       </a>
                       <button
                         type="button"
                         className="btn tiny"
-                        onClick={() =>
-                          navigator.clipboard.writeText(requesterEmail)
-                        }
+                        onClick={() => navigator.clipboard.writeText(requesterEmail)}
                         title="Copy email"
                       >
                         Copy
@@ -342,22 +370,18 @@ export default function RequestDetails() {
           >
             {!hasActive ? (
               <Button onClick={onApply} disabled={submitting}>
-                {submitting ? "Applying..." : "Apply to Donate"}
+                {submitting ? "Withdrawing..." : "Apply to Donate"}
               </Button>
             ) : (
               <Button
                 variant="secondary"
                 onClick={onWithdraw}
-                disabled={
-                  submitting || !myApp?.id || myApp?.status !== "Applied"
-                }
+                disabled={submitting || !myApp?.id || myApp?.status !== "Applied"}
               >
-                {submitting ? "Withdrawing..." : "Withdraw Application"}
+                {submitting ? "Applying..." : "Withdraw Application"}
               </Button>
             )}
-            <Button variant="ghost" onClick={() => navigate(-1)}>
-              Back
-            </Button>
+            <Button variant="ghost" onClick={() => navigate(-1)}>Back</Button>
             <span className="muted" style={{ fontSize: 12 }}>
               Your contact info will be shared with the requester upon applying.
             </span>
